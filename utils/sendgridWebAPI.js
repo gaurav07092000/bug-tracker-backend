@@ -1,13 +1,11 @@
 const sgMail = require('@sendgrid/mail');
 
-// SendGrid Web API Email Service (Alternative to SMTP)
 class SendGridWebAPIService {
   constructor() {
     this.isInitialized = false;
     this.initialize();
   }
 
-  // Initialize SendGrid Web API
   initialize() {
     try {
       const apiKey = process.env.SENDGRID_API_KEY;
@@ -21,7 +19,6 @@ class SendGridWebAPIService {
       this.isInitialized = true;
       console.log('✅ SendGrid Web API initialized successfully');
       
-      // Validate sender email
       if (!process.env.EMAIL_FROM) {
         console.log('⚠️  EMAIL_FROM not set - emails may fail');
       } else {
@@ -34,7 +31,6 @@ class SendGridWebAPIService {
     }
   }
 
-  // Send email using SendGrid Web API
   async sendEmail({ to, subject, text, html }) {
     try {
       if (!this.isInitialized) {
@@ -64,7 +60,6 @@ class SendGridWebAPIService {
       if (error.response) {
         console.error('Response body:', error.response.body);
         
-        // Handle specific SendGrid errors
         if (error.response.body.errors) {
           const errors = error.response.body.errors;
           for (const err of errors) {
@@ -81,7 +76,6 @@ class SendGridWebAPIService {
     }
   }
 
-  // Send welcome email
   async sendWelcomeEmail(user) {
     const subject = 'Welcome to Bug Tracker System';
     const html = `
@@ -108,7 +102,6 @@ class SendGridWebAPIService {
     });
   }
 
-  // Send password reset email
   async sendPasswordResetEmail(email, resetToken) {
     const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
     
@@ -144,7 +137,6 @@ class SendGridWebAPIService {
     });
   }
 
-  // Test email functionality
   async sendTestEmail(to) {
     const subject = 'Bug Tracker Email Test';
     const html = `

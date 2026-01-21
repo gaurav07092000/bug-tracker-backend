@@ -1,18 +1,15 @@
 const nodemailer = require('nodemailer');
 const SendGridWebAPIService = require('./sendgridWebAPI');
 
-// Email service utility using SendGrid Web API (primary) with SMTP fallback
 class EmailService {
   constructor() {
     this.transporter = null;
     this.webApiService = null;
-    // Use Web API by default in production or when explicitly enabled
     this.useWebAPI = process.env.USE_SENDGRID_WEB_API === 'true' || 
                      process.env.NODE_ENV === 'production';
     this.initialize();
   }
 
-  // Initialize email services (Web API primary, SMTP fallback)
   initialize() {
     try {
       const sendgridApiKey = process.env.SENDGRID_API_KEY;
@@ -22,7 +19,6 @@ class EmailService {
         return;
       }
 
-      // PRIORITY 1: Initialize Web API service (recommended for production)
       try {
         this.webApiService = new SendGridWebAPIService();
         console.log('✅ SendGrid Web API service initialized (primary)');
@@ -30,24 +26,21 @@ class EmailService {
         console.error('❌ Web API service initialization failed:', error.message);
       }
 
-      // PRIORITY 2: Initialize SMTP as fallback (for development/backup)
       if (!this.useWebAPI || process.env.NODE_ENV === 'development') {
         console.log('🔧 Initializing SMTP as fallback...');
         this.transporter = nodemailer.createTransport({
           host: process.env.EMAIL_HOST || 'smtp.sendgrid.net',
           port: parseInt(process.env.EMAIL_PORT || '587'),
-          secure: false, // Use STARTTLS
+          secure: false,
           auth: {
             user: process.env.EMAIL_USER || 'apikey',
             pass: sendgridApiKey
           },
-          // Production-specific settings
-          connectionTimeout: 30000, // 30 seconds (reduced for faster fallback)
-          greetingTimeout: 15000,   // 15 seconds
-          socketTimeout: 30000,     // 30 seconds
+          connectionTimeout: 30000,
+          greetingTimeout: 15000,
+          socketTimeout: 30000,
           debug: process.env.NODE_ENV === 'development',
           logger: process.env.NODE_ENV === 'development',
-          // Required for some hosting providers
           requireTLS: true,
           tls: {
             rejectUnauthorized: process.env.NODE_ENV === 'production'
@@ -58,22 +51,17 @@ class EmailService {
         console.log('ℹ️  SMTP disabled in production (Web API only)');
       }
 
-      // Verify services
       if (process.env.NODE_ENV === 'production') {
-        // Non-blocking verification for production
         setImmediate(() => this.verifyServices());
       } else {
-        // Blocking verification for development
         this.verifyServices();
       }
     } catch (error) {
       console.error('❌ Email service initialization failed:', error.message);
-      // Set transporter to null so we know it failed
       this.transporter = null;
     }
   }
 
-  // Verify email services (Web API primary, SMTP fallback)
   async verifyServices() {
     console.log('🔍 Verifying email services...');
     console.log('📧 Email FROM:', process.env.EMAIL_FROM);
@@ -83,7 +71,6 @@ class EmailService {
     let webApiOk = false;
     let smtpOk = false;
     
-    // Test Web API (primary)
     if (this.webApiService) {
       console.log('✅ SendGrid Web API service available');
       webApiOk = true;
@@ -91,7 +78,6 @@ class EmailService {
       console.log('❌ SendGrid Web API service not available');
     }
     
-    // Test SMTP (fallback)
     if (this.transporter) {
       try {
         console.log('🔍 Testing SMTP connection...');
@@ -105,7 +91,6 @@ class EmailService {
       console.log('ℹ️  SMTP service not configured');
     }
     
-    // Summary
     if (webApiOk) {
       console.log('🎉 Email service ready (Web API primary)');
     } else if (smtpOk) {
@@ -120,10 +105,8 @@ class EmailService {
     return webApiOk || smtpOk;
   }
 
-  // Send email using Web API (primary) with SMTP fallback
   async sendEmail({ to, subject, text, html }, retryCount = 0) {
     
-    // PRIORITY 1: Try Web API first (recommended for production)
     if (this.webApiService) {
       console.log('🌐 Attempting to send email via SendGrid Web API...');
       console.log(`   To: ${to}`);
@@ -136,14 +119,12 @@ class EmailService {
       } else {
         console.log('❌ Web API failed:', result.error);
         if (!this.transporter || this.useWebAPI) {
-          // If Web API fails and we don't have SMTP or we're in Web API only mode
           return result;
         }
         console.log('🔄 Falling back to SMTP...');
       }
     }
 
-    // PRIORITY 2: Try SMTP fallback (may fail in production due to port blocking)
     if (this.transporter) {
       try {
         const mailOptions = {
@@ -165,7 +146,6 @@ class EmailService {
       } catch (error) {
         console.error('❌ SMTP fallback also failed:', error.message);
         
-        // Return the error from SMTP attempt
         return { 
           success: false, 
           error: `Both Web API and SMTP failed. Last error: ${error.message}`,
@@ -177,7 +157,6 @@ class EmailService {
       }
     }
     
-    // No email services available
     console.log('❌ No email services available');
     return { 
       success: false, 
@@ -189,7 +168,6 @@ class EmailService {
     };
   }
 
-  // Send welcome email to new users
   async sendWelcomeEmail(user) {
     const subject = 'Welcome to Bug Tracker System';
     const html = `
@@ -215,7 +193,6 @@ class EmailService {
     });
   }
 
-  // Send ticket assignment notification
   async sendTicketAssignmentEmail(ticket, assignedUser, assignedBy) {
     const subject = `Ticket Assigned: ${ticket.title}`;
     const html = `
@@ -244,7 +221,6 @@ class EmailService {
     });
   }
 
-  // Send ticket status update notification
   async sendTicketStatusUpdateEmail(ticket, updatedBy) {
     const subject = `Ticket Status Update: ${ticket.title}`;
     const html = `
@@ -277,7 +253,6 @@ class EmailService {
     return await Promise.allSettled(promises);
   }
 
-  // Send project invitation email
   async sendProjectInvitationEmail(project, invitedUser, invitedBy) {
     const subject = `Project Invitation: ${project.name}`;
     const html = `
