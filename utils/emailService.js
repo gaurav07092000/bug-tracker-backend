@@ -10,25 +10,48 @@ class EmailService {
   // Initialize nodemailer transporter
   initialize() {
     try {
-      this.transporter = nodemailer.createTransport({
-        host: process.env.EMAIL_HOST,
-        port: parseInt(process.env.EMAIL_PORT),
-        secure: false, // true for 465, false for other ports
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS
-        },
-        tls: {
-          rejectUnauthorized: false // for development
-        }
-      });
+      // Check if SendGrid API key is available
+      const sendgridApiKey = process.env.SENDGRID_API_KEY;
+      
+      if (sendgridApiKey && sendgridApiKey !== 'your_sendgrid_api_key_here') {
+        // Use SendGrid SMTP configuration
+        console.log('🔧 Initializing SendGrid email service...');
+        this.transporter = nodemailer.createTransport({
+          host: process.env.EMAIL_HOST || 'smtp.sendgrid.net',
+          port: parseInt(process.env.EMAIL_PORT || '587'),
+          secure: false, // true for 465, false for other ports
+          auth: {
+            user: process.env.EMAIL_USER || 'apikey',
+            pass: sendgridApiKey
+          }
+        });
+        console.log('✅ SendGrid transporter created');
+      } else {
+        // Fallback to regular SMTP (for development)
+        console.log('🔧 Initializing fallback SMTP email service...');
+        this.transporter = nodemailer.createTransport({
+          host: process.env.EMAIL_HOST,
+          port: parseInt(process.env.EMAIL_PORT),
+          secure: false,
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS
+          },
+          tls: {
+            rejectUnauthorized: false // for development
+          }
+        });
+        console.log('✅ SMTP transporter created');
+      }
 
       // Verify connection configuration
       if (process.env.NODE_ENV === 'development') {
         this.verifyConnection();
       }
     } catch (error) {
-      // Email service initialization failed - continue without emails
+      console.error('❌ Email service initialization failed:', error.message);
+      // Set transporter to null so we know it failed
+      this.transporter = null;
     }
   }
 
@@ -46,7 +69,8 @@ class EmailService {
   async sendEmail({ to, subject, text, html }) {
     try {
       if (!this.transporter) {
-        throw new Error('Email transporter not initialized');
+        console.log('❌ Email transporter not initialized - check your email configuration');
+        return { success: false, error: 'Email transporter not initialized. Check SENDGRID_API_KEY and email configuration.' };
       }
 
       const mailOptions = {
@@ -62,6 +86,15 @@ class EmailService {
       return { success: true, messageId: info.messageId };
     } catch (error) {
       console.error('📧 Email send failed:', error.message);
+      
+      // Check for specific SendGrid sender identity error
+      if (error.message.includes('does not match a verified Sender Identity')) {
+        console.error('❌ SENDGRID ERROR: Email address needs verification!');
+        console.error('🔧 Fix: Go to SendGrid Dashboard → Settings → Sender Authentication');
+        console.error('📧 Verify this email:', process.env.EMAIL_FROM);
+        console.error('📖 Guide: https://sendgrid.com/docs/for-developers/sending-email/sender-identity/');
+      }
+      
       return { success: false, error: error.message };
     }
   }
