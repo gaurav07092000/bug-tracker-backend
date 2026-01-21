@@ -1,52 +1,70 @@
 const nodemailer = require('nodemailer');
+const SendGridWebAPIService = require('./sendgridWebAPI');
 
-// Email service utility using Nodemailer
+// Email service utility using SendGrid Web API (primary) with SMTP fallback
 class EmailService {
   constructor() {
     this.transporter = null;
+    this.webApiService = null;
+    // Use Web API by default in production or when explicitly enabled
+    this.useWebAPI = process.env.USE_SENDGRID_WEB_API === 'true' || 
+                     process.env.NODE_ENV === 'production';
     this.initialize();
   }
 
-  // Initialize nodemailer transporter
+  // Initialize email services (Web API primary, SMTP fallback)
   initialize() {
     try {
-      // Check if SendGrid API key is available
       const sendgridApiKey = process.env.SENDGRID_API_KEY;
       
-      if (sendgridApiKey && sendgridApiKey !== 'your_sendgrid_api_key_here') {
-        // Use SendGrid SMTP configuration
-        console.log('🔧 Initializing SendGrid email service...');
+      if (!sendgridApiKey || sendgridApiKey === 'your_sendgrid_api_key_here') {
+        console.log('❌ SENDGRID_API_KEY not configured');
+        return;
+      }
+
+      // PRIORITY 1: Initialize Web API service (recommended for production)
+      try {
+        this.webApiService = new SendGridWebAPIService();
+        console.log('✅ SendGrid Web API service initialized (primary)');
+      } catch (error) {
+        console.error('❌ Web API service initialization failed:', error.message);
+      }
+
+      // PRIORITY 2: Initialize SMTP as fallback (for development/backup)
+      if (!this.useWebAPI || process.env.NODE_ENV === 'development') {
+        console.log('🔧 Initializing SMTP as fallback...');
         this.transporter = nodemailer.createTransport({
           host: process.env.EMAIL_HOST || 'smtp.sendgrid.net',
           port: parseInt(process.env.EMAIL_PORT || '587'),
-          secure: false, // true for 465, false for other ports
+          secure: false, // Use STARTTLS
           auth: {
             user: process.env.EMAIL_USER || 'apikey',
             pass: sendgridApiKey
-          }
-        });
-        console.log('✅ SendGrid transporter created');
-      } else {
-        // Fallback to regular SMTP (for development)
-        console.log('🔧 Initializing fallback SMTP email service...');
-        this.transporter = nodemailer.createTransport({
-          host: process.env.EMAIL_HOST,
-          port: parseInt(process.env.EMAIL_PORT),
-          secure: false,
-          auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
           },
+          // Production-specific settings
+          connectionTimeout: 30000, // 30 seconds (reduced for faster fallback)
+          greetingTimeout: 15000,   // 15 seconds
+          socketTimeout: 30000,     // 30 seconds
+          debug: process.env.NODE_ENV === 'development',
+          logger: process.env.NODE_ENV === 'development',
+          // Required for some hosting providers
+          requireTLS: true,
           tls: {
-            rejectUnauthorized: false // for development
+            rejectUnauthorized: process.env.NODE_ENV === 'production'
           }
         });
-        console.log('✅ SMTP transporter created');
+        console.log('✅ SMTP transporter created (fallback)');
+      } else {
+        console.log('ℹ️  SMTP disabled in production (Web API only)');
       }
 
-      // Verify connection configuration
-      if (process.env.NODE_ENV === 'development') {
-        this.verifyConnection();
+      // Verify services
+      if (process.env.NODE_ENV === 'production') {
+        // Non-blocking verification for production
+        setImmediate(() => this.verifyServices());
+      } else {
+        // Blocking verification for development
+        this.verifyServices();
       }
     } catch (error) {
       console.error('❌ Email service initialization failed:', error.message);
@@ -55,48 +73,120 @@ class EmailService {
     }
   }
 
-  // Verify email connection
-  async verifyConnection() {
-    try {
-      await this.transporter.verify();
-      console.log('✅ Email service connected successfully');
-    } catch (error) {
-      console.log('❌ Email service failed:', error.message);
+  // Verify email services (Web API primary, SMTP fallback)
+  async verifyServices() {
+    console.log('🔍 Verifying email services...');
+    console.log('📧 Email FROM:', process.env.EMAIL_FROM);
+    console.log('🌐 Environment:', process.env.NODE_ENV);
+    console.log('🔧 Use Web API:', this.useWebAPI);
+    
+    let webApiOk = false;
+    let smtpOk = false;
+    
+    // Test Web API (primary)
+    if (this.webApiService) {
+      console.log('✅ SendGrid Web API service available');
+      webApiOk = true;
+    } else {
+      console.log('❌ SendGrid Web API service not available');
     }
+    
+    // Test SMTP (fallback)
+    if (this.transporter) {
+      try {
+        console.log('🔍 Testing SMTP connection...');
+        await this.transporter.verify();
+        console.log('✅ SMTP service connected successfully');
+        smtpOk = true;
+      } catch (error) {
+        console.log('❌ SMTP service failed:', error.message);
+      }
+    } else {
+      console.log('ℹ️  SMTP service not configured');
+    }
+    
+    // Summary
+    if (webApiOk) {
+      console.log('🎉 Email service ready (Web API primary)');
+    } else if (smtpOk) {
+      console.log('⚠️  Email service ready (SMTP only - may fail in production)');
+    } else {
+      console.log('❌ No email service available!');
+      console.log('🔧 Check your environment variables:');
+      console.log('   - SENDGRID_API_KEY:', process.env.SENDGRID_API_KEY ? 'Set (hidden)' : 'Not set');
+      console.log('   - EMAIL_FROM:', process.env.EMAIL_FROM || 'Not set');
+    }
+    
+    return webApiOk || smtpOk;
   }
 
-  // Send email utility function
-  async sendEmail({ to, subject, text, html }) {
-    try {
-      if (!this.transporter) {
-        console.log('❌ Email transporter not initialized - check your email configuration');
-        return { success: false, error: 'Email transporter not initialized. Check SENDGRID_API_KEY and email configuration.' };
-      }
-
-      const mailOptions = {
-        from: `"Bug Tracker" <${process.env.EMAIL_FROM || 'noreply@bugtracker.com'}>`,
-        to,
-        subject,
-        text,
-        html: html || text
-      };
-
-      const info = await this.transporter.sendMail(mailOptions);
-      console.log('📧 Email sent successfully:', info.messageId);
-      return { success: true, messageId: info.messageId };
-    } catch (error) {
-      console.error('📧 Email send failed:', error.message);
+  // Send email using Web API (primary) with SMTP fallback
+  async sendEmail({ to, subject, text, html }, retryCount = 0) {
+    
+    // PRIORITY 1: Try Web API first (recommended for production)
+    if (this.webApiService) {
+      console.log('🌐 Attempting to send email via SendGrid Web API...');
+      console.log(`   To: ${to}`);
+      console.log(`   Subject: ${subject}`);
       
-      // Check for specific SendGrid sender identity error
-      if (error.message.includes('does not match a verified Sender Identity')) {
-        console.error('❌ SENDGRID ERROR: Email address needs verification!');
-        console.error('🔧 Fix: Go to SendGrid Dashboard → Settings → Sender Authentication');
-        console.error('📧 Verify this email:', process.env.EMAIL_FROM);
-        console.error('📖 Guide: https://sendgrid.com/docs/for-developers/sending-email/sender-identity/');
+      const result = await this.webApiService.sendEmail({ to, subject, text, html });
+      if (result.success) {
+        console.log('✅ Email sent successfully via Web API');
+        return { ...result, method: 'SendGrid Web API' };
+      } else {
+        console.log('❌ Web API failed:', result.error);
+        if (!this.transporter || this.useWebAPI) {
+          // If Web API fails and we don't have SMTP or we're in Web API only mode
+          return result;
+        }
+        console.log('🔄 Falling back to SMTP...');
       }
-      
-      return { success: false, error: error.message };
     }
+
+    // PRIORITY 2: Try SMTP fallback (may fail in production due to port blocking)
+    if (this.transporter) {
+      try {
+        const mailOptions = {
+          from: `"Bug Tracker" <${process.env.EMAIL_FROM || 'noreply@bugtracker.com'}>`,
+          to,
+          subject,
+          text,
+          html: html || text
+        };
+
+        console.log('📧 Attempting SMTP email (fallback)...');
+        console.log(`   To: ${to}`);
+        console.log(`   From: ${mailOptions.from}`);
+        console.log(`   Subject: ${subject}`);
+        
+        const info = await this.transporter.sendMail(mailOptions);
+        console.log('✅ Email sent successfully via SMTP:', info.messageId);
+        return { success: true, messageId: info.messageId, method: 'SMTP (fallback)' };
+      } catch (error) {
+        console.error('❌ SMTP fallback also failed:', error.message);
+        
+        // Return the error from SMTP attempt
+        return { 
+          success: false, 
+          error: `Both Web API and SMTP failed. Last error: ${error.message}`,
+          details: {
+            webApiError: this.webApiService ? 'Failed (see logs above)' : 'Not available',
+            smtpError: error.message
+          }
+        };
+      }
+    }
+    
+    // No email services available
+    console.log('❌ No email services available');
+    return { 
+      success: false, 
+      error: 'No email services available. Check SENDGRID_API_KEY and configuration.',
+      details: {
+        webApiService: this.webApiService ? 'Available but failed' : 'Not initialized',
+        smtpService: this.transporter ? 'Available but failed' : 'Not initialized'
+      }
+    };
   }
 
   // Send welcome email to new users
