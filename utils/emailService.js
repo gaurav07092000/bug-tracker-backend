@@ -36,9 +36,9 @@ class EmailService {
   async verifyConnection() {
     try {
       await this.transporter.verify();
-      // Email service ready
+      console.log('✅ Email service connected successfully');
     } catch (error) {
-      // Email service verification failed - notifications disabled
+      console.log('❌ Email service failed:', error.message);
     }
   }
 
@@ -50,7 +50,7 @@ class EmailService {
       }
 
       const mailOptions = {
-        from: process.env.EMAIL_FROM || 'Bug Tracker <noreply@bugtracker.com>',
+        from: `"Bug Tracker" <${process.env.EMAIL_FROM || 'noreply@bugtracker.com'}>`,
         to,
         subject,
         text,
@@ -58,8 +58,10 @@ class EmailService {
       };
 
       const info = await this.transporter.sendMail(mailOptions);
+      console.log('📧 Email sent successfully:', info.messageId);
       return { success: true, messageId: info.messageId };
     } catch (error) {
+      console.error('📧 Email send failed:', error.message);
       return { success: false, error: error.message };
     }
   }
